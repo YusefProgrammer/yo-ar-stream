@@ -37,6 +37,16 @@
       ]
     },
 {
+  "id": "fivetv",
+  "name": "5TV",
+  "version": "1.0.0",
+  "filename": "providers/5tv.js",
+  "supportedTypes": ["movie", "tv"],
+  "contentLanguage": ["ar"],
+  "logo": "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/main/5TV/icon.png",
+  "enabled": true
+},
+{
   "id": "egywatch",
   "name": "EgyWatch",
   "description": "ايجي واتش مكتبة ضخم من افلام و مسلسلات  تحيا له ",
