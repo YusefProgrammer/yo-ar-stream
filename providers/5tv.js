@@ -1,5 +1,5 @@
 /**
- * 5TV - Nuvio JS Provider (Episode Selection FIXED)
+ * 5TV - Nuvio JS Provider (Matching CloudStream Kotlin logic)
  */
 
 var BASE_URL = "https://new61.5tv.lol";
@@ -18,45 +18,6 @@ function cleanUrl(u) {
   var s = String(u||"").replace(/\\\//g, "/"); s = unescapeHtml(s);
   s = s.split('"')[0].split("'")[0].split("<")[0].split(">")[0].split(",")[0].split("\\")[0];
   return s.trim();
-}
-
-/* ---------------- Episode number extraction (AGGRESSIVE) ---------------- */
-
-function extractEpisodeNum(text, url) {
-  var t = unescapeHtml(String(text || ""));
-  var u = String(url || "");
-  var combo = t + " ||| " + u;
-
-  // Priority 1: Arabic / English keywords followed by number
-  var patterns = [
-    /الحلقة\s*0*(\d{1,4})(?!\d)/i,
-    /حلقة\s*0*(\d{1,4})(?!\d)/i,
-    /episode\s*0*(\d{1,4})(?!\d)/i,
-    /ep\.?\s*0*(\d{1,4})(?!\d)/i,
-    /s\d{1,2}e0*(\d{1,4})(?!\d)/i,
-    /\d{1,2}x0*(\d{1,4})(?!\d)/i
-  ];
-  for (var i = 0; i < patterns.length; i++) {
-    var m = combo.match(patterns[i]);
-    if (m) { var n = parseInt(m[1], 10); if (!isNaN(n)) return n; }
-  }
-
-  // Priority 2: URL with /episode/ — take the LAST number in the slug
-  if (u.indexOf("/episode/") !== -1 || u.indexOf("/ep-") !== -1) {
-    // Get the part after /episode/ (up to next / or end)
-    var slugMatch = u.match(/\/(?:episode|ep)[\/_-]([^\/?#]+)/i);
-    var slug = slugMatch ? slugMatch[1] : u;
-    // Find all numbers in slug, take the last
-    var nums = slug.match(/\d{1,4}/g);
-    if (nums && nums.length > 0) {
-      // Filter out years (1900-2099) if there's another number
-      var nonYear = nums.filter(function(x){ var v = parseInt(x,10); return v < 1900 || v > 2099; });
-      var pick = nonYear.length > 0 ? nonYear[nonYear.length - 1] : nums[nums.length - 1];
-      return parseInt(pick, 10);
-    }
-  }
-
-  return null;
 }
 
 /* ---------------- HTTP ---------------- */
@@ -87,6 +48,38 @@ function tmdbInfo(tmdbId, mediaType) {
     .catch(function(e){ log("TMDB error:", e.message); return { titles: [], year: null }; });
 }
 
+/* ---------------- Episode number extraction ---------------- */
+
+function extractEpisodeNum(text, url) {
+  var t = unescapeHtml(String(text || ""));
+  var u = String(url || "");
+  var combo = t + " ||| " + u;
+
+  // Arabic/English keywords
+  var patterns = [
+    /الحلقة\s*0*(\d{1,4})(?!\d)/i, /حلقة\s*0*(\d{1,4})(?!\d)/i,
+    /episode\s*0*(\d{1,4})(?!\d)/i, /ep\.?\s*0*(\d{1,4})(?!\d)/i,
+    /s\d{1,2}e0*(\d{1,4})(?!\d)/i, /\d{1,2}x0*(\d{1,4})(?!\d)/i
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = combo.match(patterns[i]);
+    if (m) { var n = parseInt(m[1], 10); if (!isNaN(n)) return n; }
+  }
+
+  // URL with /episode/ — take last number in slug
+  if (u.indexOf("/episode/") !== -1 || u.indexOf("/ep-") !== -1) {
+    var slugMatch = u.match(/\/(?:episode|ep)[\/_-]([^\/?#]+)/i);
+    var slug = slugMatch ? slugMatch[1] : u;
+    var nums = slug.match(/\d{1,4}/g);
+    if (nums && nums.length > 0) {
+      var nonYear = nums.filter(function(x){ var v = parseInt(x,10); return v < 1900 || v > 2099; });
+      var pick = nonYear.length > 0 ? nonYear[nonYear.length - 1] : nums[nums.length - 1];
+      return parseInt(pick, 10);
+    }
+  }
+  return null;
+}
+
 /* ---------------- Search ---------------- */
 
 function search5tv(query) {
@@ -95,39 +88,31 @@ function search5tv(query) {
   return fetchHtml(url).then(function(html){
     if (!html) return [];
     var results = [], seen = {};
-
-    // Find all articles (search result cards)
     var articleRe = /<article[^>]*>([\s\S]*?)<\/article>/gi;
     var m;
     while ((m = articleRe.exec(html)) !== null) {
       var block = m[1];
-
-      // Title
       var tm = block.match(/<[^>]*class=["'][^"']*(?:ftv-home-poster-card__title|ftv-home-episode-card__title|ftv-search-card__title)[^"']*["'][^>]*>([\s\S]*?)<\//i)
         || block.match(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/i);
       if (!tm) continue;
       var title = unescapeHtml(tm[1].replace(/<[^>]+>/g, "")).trim();
       if (!title) continue;
 
-      // URL
       var um = block.match(/<a[^>]+href=["']([^"']+)["']/i);
       if (!um) continue;
       var href = fixUrl(um[1], BASE_URL);
       if (seen[href]) continue;
       seen[href] = true;
 
-      // Poster
       var pm = block.match(/<img[^>]+(?:data-src|src)=["']([^"']+)["']/i);
       var poster = pm ? fixUrl(pm[1], BASE_URL) : "";
 
-      // Classify
       var isMovieUrl = /\/movie\//.test(href);
       var isEpisodeUrl = /\/episode\//.test(href) || /\/ep[-_\/]/.test(href);
       var isSeriesUrl = /\/series\//.test(href);
       var hasEpWord = /الحلقة|حلقة|episode|ep\.?\s*\d/i.test(title);
       var epNum = extractEpisodeNum(title, href);
 
-      // If URL has /episode/ OR title has episode word OR title has E3 pattern
       var isEpisode = isEpisodeUrl || hasEpWord || (epNum !== null && /s\d+e\d+|\d+x\d+/i.test(title));
       var isSeries = (isSeriesUrl || /مسلسل/i.test(title)) && !isMovieUrl && !isEpisodeUrl;
 
@@ -137,7 +122,6 @@ function search5tv(query) {
         episodeNum: epNum
       });
     }
-
     log("SEARCH RESULTS:", results.length);
     results.forEach(function(r, i){
       log("  [" + i + "]", r.title, "| URL:", r.url,
@@ -147,51 +131,54 @@ function search5tv(query) {
   });
 }
 
-/* ---------------- Extract episodes from series page ---------------- */
+/* ---------------- Extract episodes (matching Kotlin logic) ---------------- */
 
 function extractEpisodes(html, pageUrl) {
   if (!html) return [];
   var episodes = [], seen = {};
   var m;
 
-  // PRIMARY: find ALL anchors pointing to /episode/
-  var linkRe = /<a\b[^>]*?href=["']([^"']*(?:\/episode\/|\/ep[-_\/])[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  while ((m = linkRe.exec(html)) !== null) {
-    var eUrl = fixUrl(m[1], BASE_URL);
+  // PRIMARY: Same selector as Kotlin
+  // ".ftv-series-episodes-grid .ftv-episode-completion-item, .ftv-episodes-grid .ftv-episode-completion-item"
+  var itemRe = /<[^>]*class=["'][^"']*ftv-(?:series-)?episode-completion-item[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi;
+  while ((m = itemRe.exec(html)) !== null) {
+    var block = m[0]; // full match
+    // Find anchor inside
+    var aM = block.match(/<a[^>]+href=["']([^"']+)["']/i);
+    if (!aM) continue;
+    var eUrl = fixUrl(aM[1], BASE_URL);
     if (seen[eUrl]) continue;
     seen[eUrl] = true;
 
-    var inner = m[2];
-    // Title from <strong> or text
-    var tM = inner.match(/<strong[^>]*>([\s\S]*?)<\/strong>/i);
-    var txt = tM ? tM[1] : inner;
+    // Title from strong inside .ftv-series-episode-card__body or .ftv-episode-card__text
+    var tM = block.match(/<strong[^>]*>([\s\S]*?)<\/strong>/i);
+    var txt = tM ? tM[1] : block;
     txt = unescapeHtml(txt.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
 
     var num = extractEpisodeNum(txt, eUrl);
     episodes.push({ url: eUrl, name: txt || "حلقة", episode: num, season: 1 });
   }
 
-  // FALLBACK: any anchor whose text has "الحلقة N"
+  // FALLBACK: any anchor pointing to /episode/
   if (episodes.length === 0) {
-    var anyRe = /<a\b[^>]*?href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-    while ((m = anyRe.exec(html)) !== null) {
-      var aUrl = fixUrl(m[1], BASE_URL);
-      var aTxt = unescapeHtml(m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
-      if (!/الحلقة|حلقة|episode|ep\.?\s*\d/i.test(aTxt)) continue;
-      if (seen[aUrl]) continue;
-      seen[aUrl] = true;
-      var an = extractEpisodeNum(aTxt, aUrl);
-      episodes.push({ url: aUrl, name: aTxt, episode: an, season: 1 });
+    var linkRe = /<a\b[^>]*?href=["']([^"']*(?:\/episode\/|\/ep[-_\/])[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    while ((m = linkRe.exec(html)) !== null) {
+      var eUrl = fixUrl(m[1], BASE_URL);
+      if (seen[eUrl]) continue;
+      seen[eUrl] = true;
+      var txt = unescapeHtml(m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
+      var num = extractEpisodeNum(txt, eUrl);
+      episodes.push({ url: eUrl, name: txt || "حلقة", episode: num, season: 1 });
     }
   }
 
-  // Dedupe by episode number (keep first occurrence of each)
+  // Dedupe by episode number
   var byNum = {}, final = [];
   episodes.forEach(function(e){
     if (e.episode != null) {
       if (!byNum[e.episode]) { byNum[e.episode] = 1; final.push(e); }
     } else {
-      final.push(e); // keep unknown-number episodes as-is
+      final.push(e);
     }
   });
 
@@ -338,12 +325,13 @@ function getAllStreams(pageUrl) {
   });
 }
 
-/* ---------------- Navigate from episode → series ---------------- */
+/* ---------------- Navigate from episode → series (matching Kotlin) ---------------- */
 
 function goBackToSeries(epUrl) {
   log("GO BACK TO SERIES from:", epUrl);
   return fetchHtml(epUrl).then(function(html){
     if (!html) return null;
+    // Exact selector from Kotlin: a.ftv-episode-poster-back
     var m = html.match(/<a[^>]+class=["'][^"']*ftv-episode-poster-back[^"']*["'][^>]*href=["']([^"']+)["']/i)
       || html.match(/<a[^>]+href=["']([^"']+)["'][^>]*class=["'][^"']*ftv-episode-poster-back[^"']*["']/i);
     if (m && m[1]) { var u = fixUrl(m[1], BASE_URL); log("  → back-link:", u); return u; }
@@ -413,24 +401,15 @@ function handleMovie(results, info) {
   return getAllStreams(best.url);
 }
 
-/* ---------------- TV handler (FIXED) ---------------- */
+/* ---------------- TV handler (matching CloudStream logic) ---------------- */
 
 function handleTv(results, info, wantE) {
-  // Strategy:
-  // 1. If exact episode match by number → play directly
-  // 2. If series page (not episode) exists → extract episodes, find target
-  // 3. If only episode pages → go back to series from first one, then find target
-  // 4. Fallback to first result
+  // Strategy (same as Kotlin):
+  // 1. Find series page (not episode)
+  // 2. If only episode pages, go back to series from one of them
+  // 3. Extract episodes from series page and find target by number
 
-  // Step 1: Exact episode match
-  var exactEp = results.find(function(r){ return r.episodeNum === wantE; });
-  if (exactEp) {
-    log(">>> EXACT EPISODE MATCH: E" + exactEp.episodeNum, "|", exactEp.title, "|", exactEp.url);
-    return getAllStreams(exactEp.url);
-  }
-  log("No exact match for E" + wantE + " in search results");
-
-  // Step 2: Series page
+  // Step 1: Find series page
   var seriesPage = results.find(function(r){
     return r.url.indexOf("/series/") !== -1 && !r.isEpisode && r.episodeNum === null;
   });
@@ -439,7 +418,7 @@ function handleTv(results, info, wantE) {
     return findAndPlayEpisode(seriesPage.url, wantE);
   }
 
-  // Step 3: Go back from first episode
+  // Step 2: Go back from first episode
   var firstEp = results.find(function(r){ return r.isEpisode || r.url.indexOf("/episode/") !== -1; });
   if (firstEp) {
     log(">>> NAVIGATING BACK from:", firstEp.title, firstEp.url);
@@ -450,7 +429,7 @@ function handleTv(results, info, wantE) {
     });
   }
 
-  // Step 4: Fallback
+  // Step 3: Fallback
   log(">>> FALLBACK to first result:", results[0].title);
   return getAllStreams(results[0].url);
 }
@@ -467,7 +446,6 @@ function getStreams(tmdbId, mediaType, season, episode) {
     if (!info.titles.length) { log("NO TMDB TITLES"); return []; }
     log("TMDB TITLES:", info.titles.join(" | "));
 
-    // Search with first 2 titles in parallel
     return Promise.all(info.titles.slice(0, 2).map(search5tv)).then(function(arrs){
       var results = [], seen = {};
       arrs.forEach(function(arr){
