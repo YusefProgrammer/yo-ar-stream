@@ -75,6 +75,12 @@
       <td>🇸🇦 عربي </td>
       <td>✅ يعمل</td>
     </tr>
+<tr>
+      <td><b>🟢 EgyWatch</b></td>
+      <td>أفلام • مسلسلات • أنمي</td>
+      <td>🇸🇦 عربي </td>
+      <td>✅ يعمل</td>
+    </tr>
   </tbody>
 </table>
 
